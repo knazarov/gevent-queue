@@ -38,3 +38,7 @@ Usage Example
 
     print(q.get())
     q.task_done()
+
+
+
+.. _pip: https://pip.pypa.io/en/stable/quickstart/
