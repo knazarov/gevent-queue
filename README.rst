@@ -45,6 +45,7 @@ Using queues:
 Using locks:
 
 .. code-block:: python
+
     import redis
     import time
     import gevent_queue
