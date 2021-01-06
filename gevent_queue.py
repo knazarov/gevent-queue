@@ -190,3 +190,71 @@ class Queue:
 
         self.redis.xack(self.stream_name, self.consumer_group, message_id)
         self.set_current_message_id(None)
+
+
+class Lock:
+    def __init__(
+        self, redis, name, prefix="gevent-queue:lock", timeout=30, retry_wait=1
+    ):
+        self.redis = redis
+
+        self.lock_name = prefix + ":" + name
+
+        self.threadlocal = threading.local()
+
+        safe_release_lua = """
+            if redis.call("get",KEYS[1]) == ARGV[1] then
+                return redis.call("del",KEYS[1])
+            else
+                return 0
+            end
+        """
+
+        self.safe_release = redis.register_script(safe_release_lua)
+        self.timeout = timeout
+        self.retry_wait = retry_wait
+
+    def get_lock_value(self):
+        if "lock_value" not in self.threadlocal.__dict__:
+            return None
+
+        return self.threadlocal.lock_value
+
+    def set_lock_value(self, value):
+        self.threadlocal.lock_value = value
+
+    def acquire(self, block=True, timeout=None):
+        start_time = int(time.time() * 1000)
+
+        while True:
+            self.set_lock_value(str(uuid.uuid4()))
+
+            res = self.redis.set(
+                self.lock_name,
+                self.get_lock_value(),
+                nx=True,
+                px=int(self.timeout * 1000),
+            )
+
+            if res:
+                return True
+
+            if not block:
+                return False
+
+            current_time = int(time.time() * 1000)
+            if timeout is not None and current_time - start_time > timeout * 1000:
+                return False
+
+            time.sleep(self.retry_wait)
+
+    def release(self):
+        lock_value = self.get_lock_value()
+
+        self.safe_release(keys=[self.lock_name], args=[lock_value])
+
+    def __enter__(self):
+        self.acquire()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.release()

@@ -19,13 +19,15 @@ Install and update using `pip`_:
 
 
 
-Usage Example
--------------
+Usage Examples
+--------------
+
+Using queues:
 
 .. code-block:: python
 
     import redis
-    import gevent-queue
+    import gevent_queue
 
     r = redis.Redis()
     q = gevent_queue.Queue(r, "myqueue")
@@ -38,6 +40,33 @@ Usage Example
 
     print(q.get())
     q.task_done()
+
+
+Using locks:
+
+.. code-block:: python
+    import redis
+    import time
+    import gevent_queue
+    import threading
+
+    r = redis.Redis()
+    l = gevent_queue.Lock(r, "mylock")
+
+    def do_work():
+        with l:
+            print("begin")
+            time.sleep(1)
+            print("end")
+
+    worker1 = threading.Thread(target=do_work)
+    worker2 = threading.Thread(target=do_work)
+
+    worker1.start()
+    worker2.start()
+
+    worker1.join()
+    worker2.join()
 
 
 
