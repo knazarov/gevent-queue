@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import datetime
 import pickle
+import re
 import threading
 import time
 import uuid
@@ -258,3 +260,49 @@ class Lock:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
+
+
+def cron_part_matches(expr_part, dt_part):
+    if "," in expr_part:
+        return any([cron_part_matches(e, dt_part) for e in expr_part.split(",")])
+
+    if expr_part == "*":
+        return True
+
+    if expr_part.isdigit() and int(expr_part) == dt_part:
+        return True
+
+    match = re.match(r"^(\d+)-(\d+)/?(\d+)?$", expr_part)
+    if match:
+        start, end, step = [int(g or 1) for g in match.groups()]
+
+        if dt_part in range(start, end + 1, step):
+            return True
+
+    match = re.match(r"^\*/(\d+)$", expr_part)
+    if match:
+        step = int(match[1])
+
+        if dt_part % step == 0:
+            return True
+
+    return False
+
+
+def cron_matches(expr, dt):
+    expr_parts = [part.strip() for part in expr.split(" ")]
+    dt_parts = [dt.minute, dt.hour, dt.day, dt.month, dt.isoweekday() % 7]
+
+    return all([cron_part_matches(e, d) for e, d in zip(expr_parts, dt_parts)])
+
+
+def cron_occurs_between(expr, start, end=None):
+    if end is None:
+        end = datetime.now(tz=start.tzinfo)
+
+    while start <= end:
+        if cron_matches(expr, start):
+            return True
+        start += datetime.timedelta(minutes=1)
+
+    return False

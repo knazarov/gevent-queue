@@ -69,6 +69,24 @@ Using locks:
     worker1.join()
     worker2.join()
 
+Using cron expressions:
+
+.. code-block:: python
+
+    import gevent_queue
+    import datetime
+
+    date = datetime.datetime(2021, 1, 23, 11, 54)
+
+    assert gevent_queue.cron_matches("* * * * *", date)
+    assert gevent_queue.cron_matches("40-59 * * * *", date)
+    assert gevent_queue.cron_matches("* 9-16/2 * * *", date)
+
+
+    start = datetime.datetime(2021, 1, 23, 11, 54)
+    end = datetime.datetime(2021, 1, 28, 0, 0)
+
+    assert gevent_queue.cron_occurs_between("54 11 23 01 6", start, end)
 
 
 .. _pip: https://pip.pypa.io/en/stable/quickstart/
