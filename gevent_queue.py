@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import datetime
+import importlib
+import inspect
 import pickle
 import re
 import threading
@@ -140,9 +142,6 @@ class Queue:
     def get(self, block=True, timeout=None):
         self.task_done()
 
-        if block and timeout is None:
-            timeout = 0
-
         start_time = int(time.time() * 1000)
 
         while True:
@@ -158,16 +157,21 @@ class Queue:
 
             if message is None:
                 get_timeout = None
+
                 if block:
-                    stuck_check_timeout = max(
+                    get_timeout = max(
                         0, last_stuck_checked + self.stuck_check_interval - current_time
                     )
-                    block_timeout = max(0, start_time + timeout * 1000 - current_time)
 
-                    get_timeout = min(block_timeout, stuck_check_timeout)
+                    if timeout is not None:
+                        block_timeout = max(
+                            0, start_time + timeout * 1000 - current_time
+                        )
+                        get_timeout = min(block_timeout, get_timeout)
 
                 if get_timeout == 0:
                     get_timeout = None
+
                 message = self.get_message(get_timeout)
 
             if message is not None:
@@ -181,7 +185,7 @@ class Queue:
             if not block:
                 return None
 
-            if timeout is not None and current_time - start_time > timeout:
+            if timeout is not None and current_time - start_time > timeout * 1000:
                 return None
 
     def task_done(self):
@@ -298,7 +302,7 @@ def cron_matches(expr, dt):
 
 def cron_occurs_between(expr, start, end=None):
     if end is None:
-        end = datetime.now(tz=start.tzinfo)
+        end = datetime.datetime.now(tz=start.tzinfo)
 
     while start <= end:
         if cron_matches(expr, start):
@@ -306,3 +310,89 @@ def cron_occurs_between(expr, start, end=None):
         start += datetime.timedelta(minutes=1)
 
     return False
+
+
+def cron_next(expr, start, end=None):
+    if end is None:
+        end = datetime.datetime.now(tz=start.tzinfo)
+
+    while start <= end:
+        if cron_matches(expr, start):
+            return start
+        start += datetime.timedelta(minutes=1)
+
+    return None
+
+
+class Job:
+    def __init__(self, func, queue):
+        self.func = func
+        self.queue = queue
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def delay(self, *args, **kwargs):
+        func_name = f"{self.func.__module__}.{self.func.__name__}"
+
+        self.queue.put({"func": func_name, "args": args, "kwargs": kwargs})
+
+
+class Worker:
+    def __init__(self, queue, deadletter_queue=None, num_greenlets=1):
+        self.queue = queue
+        self.deadletter_queue = deadletter_queue
+        self.num_greenlets = num_greenlets
+        self.schedules = {}
+
+    def schedule(self, sched):
+        def decorator(func):
+            if not inspect.isfunction(func):
+                raise RuntimeError("Can only call regular functions")
+            func_name = f"{func.__module__}.{func.__name__}"
+            self.schedules[func_name] = sched
+
+            return Job(func, self.queue)
+
+        return decorator
+
+    def job(self, func):
+        if not inspect.isfunction(func):
+            raise RuntimeError("Can only call regular functions")
+
+        return Job(func, self.queue)
+
+    def next_schedule(self):
+        now = datetime.datetime.now()
+        now = now.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
+
+        tomorrow = now + datetime.timedelta(days=1)
+
+        next_events = [
+            cron_next(sched, now, tomorrow) for sched in self.schedules.values()
+        ]
+        next_events = list(filter(None, next_events))
+        next_events.append(tomorrow)
+
+        return min(next_events)
+
+    def step(self):
+        now = datetime.datetime.now()
+        next_schedule = self.next_schedule()
+        delta = (next_schedule - now).seconds
+
+        event = self.queue.get(block=True, timeout=delta)
+        if event is None or "func" not in event:
+            return
+
+        try:
+            full_func_name = event["func"]
+            mod_name, func_name = full_func_name.rsplit(".", 1)
+            mod = importlib.import_module(mod_name)
+            func = getattr(mod, func_name)
+            func(*event["args"], **event["kwargs"])
+        except Exception as ex:
+            pass
+        finally:
+            if event:
+                self.queue.task_done()
