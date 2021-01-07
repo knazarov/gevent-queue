@@ -266,6 +266,23 @@ class Lock:
         self.release()
 
 
+class Kv:
+    def __init__(self, redis, name, prefix="gevent-queue:kv"):
+        self.redis = redis
+        self.kv_name = prefix + ":" + name
+
+    def get(self, key):
+        value = self.redis.get(self.kv_name + ":" + key)
+        if value is None:
+            return None
+
+        return pickle.loads(value)
+
+    def put(self, key, value):
+        value = pickle.dumps(value)
+        self.redis.set(self.kv_name + ":" + key, value)
+
+
 def cron_part_matches(expr_part, dt_part):
     if "," in expr_part:
         return any([cron_part_matches(e, dt_part) for e in expr_part.split(",")])
@@ -313,6 +330,7 @@ def cron_occurs_between(expr, start, end=None):
 
 
 def cron_next(expr, start, end=None):
+    start = start.replace(second=0, microsecond=0)
     if end is None:
         end = datetime.datetime.now(tz=start.tzinfo)
 
@@ -322,6 +340,10 @@ def cron_next(expr, start, end=None):
         start += datetime.timedelta(minutes=1)
 
     return None
+
+
+def execute_job(queue, func_name, *args, **kwargs):
+    queue.put({"func": func_name, "args": args, "kwargs": kwargs})
 
 
 class Job:
@@ -335,15 +357,22 @@ class Job:
     def delay(self, *args, **kwargs):
         func_name = f"{self.func.__module__}.{self.func.__name__}"
 
-        self.queue.put({"func": func_name, "args": args, "kwargs": kwargs})
+        execute_job(self.queue, func_name, *args, **kwargs)
 
 
 class Worker:
-    def __init__(self, queue, deadletter_queue=None, num_greenlets=1):
-        self.queue = queue
-        self.deadletter_queue = deadletter_queue
+    def __init__(
+        self, redis, queue_name="default", deadletter_queue_name=None, num_greenlets=1
+    ):
+        self.queue = Queue(redis, queue_name)
+        self.deadletter_queue = None
+        if deadletter_queue_name is not None:
+            self.deadletter_queue = Queue(redis, deadletter_queue_name)
+        self.kv = Kv(redis, "cron-kv:" + queue_name)
+        self.lock = Lock(redis, "cron-lock:" + queue_name)
         self.num_greenlets = num_greenlets
         self.schedules = {}
+        self.update_next_schedule()
 
     def schedule(self, sched):
         def decorator(func):
@@ -352,6 +381,7 @@ class Worker:
             func_name = f"{func.__module__}.{func.__name__}"
             self.schedules[func_name] = sched
 
+            self.update_next_schedule()
             return Job(func, self.queue)
 
         return decorator
@@ -362,24 +392,46 @@ class Worker:
 
         return Job(func, self.queue)
 
-    def next_schedule(self):
-        now = datetime.datetime.now()
-        now = now.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
+    def get_next_schedule(self, start=None):
+        if start is None:
+            start = datetime.datetime.now()
+        start = start.replace(second=0, microsecond=0)
+        start = start + datetime.timedelta(minutes=1)
 
-        tomorrow = now + datetime.timedelta(days=1)
+        tomorrow = start + datetime.timedelta(days=1)
 
         next_events = [
-            cron_next(sched, now, tomorrow) for sched in self.schedules.values()
+            cron_next(sched, start, tomorrow) for sched in self.schedules.values()
         ]
         next_events = list(filter(None, next_events))
         next_events.append(tomorrow)
 
         return min(next_events)
 
+    def update_next_schedule(self, start=None):
+        self.next_schedule = self.get_next_schedule(start)
+
+    def execute_scheduled_jobs(self, now):
+        now = now.replace(second=0, microsecond=0)
+        with self.lock:
+            for fun, sched in self.schedules.items():
+                last_executed = self.kv.get(fun)
+
+                if last_executed is not None and last_executed >= now:
+                    continue
+
+                if cron_matches(sched, now):
+                    execute_job(self.queue, fun)
+                    self.kv.put(fun, now)
+
     def step(self):
         now = datetime.datetime.now()
-        next_schedule = self.next_schedule()
-        delta = (next_schedule - now).seconds
+
+        if now >= self.next_schedule:
+            self.execute_scheduled_jobs(now)
+            self.update_next_schedule()
+
+        delta = max(1, min(60, (self.next_schedule - now).seconds))
 
         event = self.queue.get(block=True, timeout=delta)
         if event is None or "func" not in event:
@@ -392,7 +444,8 @@ class Worker:
             func = getattr(mod, func_name)
             func(*event["args"], **event["kwargs"])
         except Exception as ex:
-            pass
+            if self.deadletter_queue:
+                self.deadletter_queue.put({"job": event, "exception": str(ex)})
         finally:
             if event:
                 self.queue.task_done()

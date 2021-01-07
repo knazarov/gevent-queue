@@ -18,9 +18,33 @@ Install and update using `pip`_:
     pip install -U gevent-queue
 
 
-
 Usage Examples
 --------------
+
+Using workers:
+
+.. code-block:: python
+
+    import gevent_queue
+    import redis
+
+    r = redis.Redis()
+    worker = gevent_queue.Worker(r, "myqueue")
+
+    @worker.job
+    def myjob(arg):
+        print("foo", arg)
+
+    @worker.schedule("*/2 * * * *")
+    def every_2_minutes():
+        print("bar")
+
+    myjob.delay("myarg")
+
+    while True:
+        worker.step()
+
+
 
 Using queues:
 
