@@ -12,7 +12,7 @@ setup(
     description="A persistent multi-producer multi-consumer gevent queue",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    version="0.1.3",
+    version="0.1.4",
     install_requires=["redis>=3.0.0"],
     license="BSD-3-Clause",
     author="Konstantin Nazarov",
