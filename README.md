@@ -8,6 +8,8 @@ processes.
 
 gevent-queue supports Redis to persist enqueued messages.
 
+**License: BSD-3-Clause**
+
 ## Installing
 
 Install and update using pip:

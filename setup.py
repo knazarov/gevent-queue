@@ -1,10 +1,12 @@
+#!/usr/bin/env python3
+
 import os
 
 from setuptools import setup
 
 this_directory = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(this_directory, "README.md")) as f:
-    long_description = f.read().decode('utf8')
+with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
+    long_description = f.read()
 
 setup(
     name="gevent-queue",
@@ -17,5 +19,5 @@ setup(
     license="BSD-3-Clause",
     author="Konstantin Nazarov",
     author_email="mail@knazarov.com",
-    py_modules=["gevent_queue"],
+    py_modules=["gevent_queue"]
 )
