@@ -10,6 +10,7 @@ import uuid
 import sys
 import textwrap
 import os
+import shutil
 import redis
 
 __package_name__ = "gevent-queue"
@@ -493,3 +494,4 @@ if __name__ == "__main__":
         os.system("python setup.py sdist")
 
         os.remove("setup.py")
+        shutil.rmtree("gevent_queue.egg-info")
