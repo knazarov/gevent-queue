@@ -7,8 +7,25 @@ import re
 import threading
 import time
 import uuid
+import sys
+import textwrap
+import os
 
 from redis.exceptions import ResponseError
+
+__package_name__ = "gevent-queue"
+__version__ = "0.1.5"
+__description__ = "A persistent multi-producer multi-consumer gevent queue"
+__long_description__ = "file: README.md"
+__long_description_content_type__ = "text/markdown"
+__author__ = "Konstantin Nazarov"
+__email__ = "mail@knazarov.com"
+__copyright__ = "Copyright 2021, Konstantin Nazarov"
+__license__ = "BSD-3-Clause"
+__url__ = "https://github.com/knazarov/gevent-queue"
+__install_requires__ = ["redis>=3.0.0"]
+
+
 
 
 class Queue:
@@ -449,3 +466,31 @@ class Worker:
         finally:
             if event:
                 self.queue.task_done()
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "sdist":
+        setup_py = f"""
+        #!/usr/bin/env python
+        from setuptools import setup
+        setup(
+            name = "{__package_name__}",
+            url = "{__url__}",
+            description = "{__description__}",
+            long_description = "{__long_description__}",
+            version = "{__version__}",
+            install_requires={__install_requires__},
+            license="{__license__}",
+            author="{__author__}",
+            author_email="{__email__}",
+            py_modules=["gevent_queue"]
+        )
+        """
+
+        setup_py = textwrap.dedent(setup_py)
+
+        with open("setup.py", "w+") as f:
+            f.write(setup_py)
+
+        os.system("python setup.py sdist")
+
+        os.remove("setup.py")

@@ -42,5 +42,5 @@ def every_2_minutes():
 myjob.delay("myarg")
 
 while True:
-worker.step()
+    worker.step()
 ```
