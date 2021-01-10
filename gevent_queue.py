@@ -10,8 +10,7 @@ import uuid
 import sys
 import textwrap
 import os
-
-from redis.exceptions import ResponseError
+import redis
 
 __package_name__ = "gevent-queue"
 __version__ = "0.1.5"
@@ -31,7 +30,7 @@ __install_requires__ = ["redis>=3.0.0"]
 class Queue:
     def __init__(
         self,
-        redis,
+        redis_obj,
         name="default",
         prefix="gevent-queue",
         stuck_timeout=5,
@@ -39,15 +38,15 @@ class Queue:
     ):
         self.stream_name = prefix + ":" + name
         self.consumer_group = prefix + ":" + name
-        self.redis = redis
+        self.redis = redis_obj
         self.stuck_timeout = stuck_timeout * 1000
         self.stuck_check_interval = stuck_check_interval * 1000
 
         self.threadlocal = threading.local()
 
         try:
-            redis.xgroup_create(self.stream_name, self.consumer_group, mkstream=True)
-        except ResponseError as ex:
+            redis_obj.xgroup_create(self.stream_name, self.consumer_group, mkstream=True)
+        except redis.exceptions.ResponseError as ex:
             if "BUSYGROUP" not in str(ex):
                 raise ex
 
